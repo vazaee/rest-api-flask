@@ -1,24 +1,9 @@
 from flask_restful import Resource, reqparse
 from models.hotel import HotelModel
+from models.site import SiteModel
+from resources.filtros import normalize_path_params, consulta_com_cidade, consulta_sem_cidade
 from flask_jwt_extended import jwt_required
 import sqlite3
-
-def normalize_path_params(cidade=None, estrelas_min = 0, estrelas_max = 5, diaria_min = 0,
-                          diaria_max = 10000, limit = 50, offset = 0, **dados):
-    args = {
-        'estrelas_min': estrelas_min,
-        'estrelas_max': estrelas_max,
-        'diaria_min': diaria_min,
-        'diaria_max': diaria_max,
-        'limit': limit,
-        'offset': offset
-    }
-    
-    if cidade:
-        args['cidade'] = cidade
-        return args
-
-    return args
 
 path_params = reqparse.RequestParser()
 path_params.add_argument('cidade', type=str)
@@ -39,21 +24,11 @@ class Hoteis(Resource):
         parametros = normalize_path_params(**dados_validos)
 
         if not parametros.get('cidade'):
-            consulta = "SELECT * FROM hoteis \
-            WHERE (estrelas >= ? and estrelas <= ?) \
-            AND (diaria >= ? and diaria <= ?) \
-            LIMIT ? OFFSET ?"
-
             tupla = tuple([parametros[chave] for chave in parametros])
-            resultado = cursor.execute(consulta, tupla)
+            resultado = cursor.execute(consulta_sem_cidade, tupla)
         else:
-            consulta = "SELECT * FROM hoteis \
-            WHERE (estrelas >= ? and estrelas <= ?) \
-            AND (diaria >= ? and diaria <= ?) \
-            AND (cidade = ?) LIMIT ? OFFSET ?"
-
             tupla = tuple([parametros[chave] for chave in parametros])
-            resultado = cursor.execute(consulta, tupla)
+            resultado = cursor.execute(consulta_com_cidade, tupla)
 
         hoteis = []
         for linha in resultado:
@@ -63,6 +38,7 @@ class Hoteis(Resource):
                 'estrelas': linha[2],
                 'diaria': linha[3],
                 'cidade': linha[4],
+                'site_id': linha[5]
             })
 
         return {'hoteis': hoteis}
@@ -70,10 +46,11 @@ class Hoteis(Resource):
 class Hotel(Resource):
 
     argumentos = reqparse.RequestParser()
-    argumentos.add_argument('nome', type=str, required=True, help="The field 'nome' cannot be left blank")
-    argumentos.add_argument('estrelas', type=float, required=True, help="The field 'estrelas' cannot be left blank")
+    argumentos.add_argument('nome', type=str, required=True, help="The field 'nome' cannot be left blank.")
+    argumentos.add_argument('estrelas', type=float, required=True, help="The field 'estrelas' cannot be left blank.")
     argumentos.add_argument('diaria')
     argumentos.add_argument('cidade')
+    argumentos.add_argument('site_id', type=int, required=True, help="Every hotel needs to be linked with a site.")
 
     def get(self, hotel_id):
         hotel = HotelModel.find_hotel(hotel_id)
@@ -89,6 +66,10 @@ class Hotel(Resource):
 
         dados = Hotel.argumentos.parse_args()
         hotel = HotelModel(hotel_id, **dados)
+
+        if not SiteModel.find_by_id(dados.get('site_id')):
+            return {"message": "Hotel must be associated to a valid site id."}, 400
+
         try:
             hotel.save_hotel()
         except:
